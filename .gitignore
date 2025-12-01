@@ -96,12 +96,17 @@ temp/
 
 # Photos (2GB+ - upload to Supabase Storage instead)
 photos/
+photos_staged_for_upload/
+photos_archive_no_db_record/
 
 # Study files (original Excel data - sensitive research data)
 study files/
 
 # Consolidated data files (contain sensitive research data)
 database/consolidated_data*.csv
+
+# Upload scripts with credentials (contains Supabase keys)
+scripts/upload_images_to_supabase.py
 
 # Validation reports (can be regenerated)
 database/validation_reports/

@@ -1,0 +1,82 @@
+STUDY 2006 ERROR ANALYSIS
+================================================================================
+
+MATCHES VIA ORIGINAL_CHOP_ID:
+--------------------------------------------------------------------------------
+DB Standardized: 0147 | Original ID: 0147 | Image: 0147
+DB Standardized: 0112 | Original ID: 0112 | Image: 0112
+DB Standardized: 0141 | Original ID: 0141 | Image: 0141
+DB Standardized: 0115 | Original ID: 0115 | Image: 0115
+DB Standardized: 0139 | Original ID: 0139 | Image: 0139
+DB Standardized: 0121 | Original ID: 0121 | Image: 0121
+DB Standardized: 0134 | Original ID: 0134 | Image: 0134
+DB Standardized: 0119 | Original ID: 0119 | Image: 0119
+DB Standardized: 0126 | Original ID: 0126 | Image: 0126
+
+
+TRANSPOSITION ERRORS:
+--------------------------------------------------------------------------------
+DB: 0147 <-> Image: 0174
+DB: 0112 <-> Image: 0112
+DB: 0112 <-> Image: 0121
+DB: 0141 <-> Image: 0114
+DB: 0068 <-> Image: 0608
+DB: 0115 <-> Image: 0151
+DB: 0115 <-> Image: 0115
+DB: 0065 <-> Image: 0605
+DB: 0139 <-> Image: 0193
+DB: 0023 <-> Image: 0203
+DB: 0137 <-> Image: 0173
+DB: 0121 <-> Image: 0112
+DB: 0119 <-> Image: 0191
+DB: 0119 <-> Image: 0119
+DB: 0152 <-> Image: 0125
+
+
+SIMILAR DIGIT ERRORS:
+--------------------------------------------------------------------------------
+DB: 0147 <-> Image: 0141
+DB: 0100 <-> Image: 0180
+DB: 0116 <-> Image: 0716
+DB: 0116 <-> Image: 0115
+DB: 0116 <-> Image: 0118
+DB: 0007 <-> Image: 0607
+DB: 0141 <-> Image: 0144
+DB: 0141 <-> Image: 0147
+DB: 0068 <-> Image: 0668
+DB: 0105 <-> Image: 0185
+DB: 0115 <-> Image: 0145
+DB: 0115 <-> Image: 0113
+DB: 0130 <-> Image: 0138
+DB: 0130 <-> Image: 0180
+DB: 0065 <-> Image: 0665
+DB: 0005 <-> Image: 0605
+DB: 0146 <-> Image: 0145
+DB: 0106 <-> Image: 0706
+DB: 0026 <-> Image: 0626
+DB: 0081 <-> Image: 0681
+DB: 0032 <-> Image: 0632
+DB: 0015 <-> Image: 0615
+DB: 0137 <-> Image: 0131
+DB: 0137 <-> Image: 0157
+DB: 0135 <-> Image: 0185
+DB: 0135 <-> Image: 0155
+DB: 0071 <-> Image: 0671
+DB: 0012 <-> Image: 0612
+DB: 0119 <-> Image: 0179
+DB: 0119 <-> Image: 0149
+DB: 0039 <-> Image: 0639
+DB: 0047 <-> Image: 0647
+DB: 0070 <-> Image: 0670
+DB: 0060 <-> Image: 0660
+DB: 0058 <-> Image: 0658
+DB: 0019 <-> Image: 0619
+DB: 0126 <-> Image: 0125
+DB: 0093 <-> Image: 0693
+DB: 0034 <-> Image: 0634
+DB: 0150 <-> Image: 0158
+DB: 0087 <-> Image: 0687
+DB: 0128 <-> Image: 0126
+DB: 0044 <-> Image: 0644
+DB: 0120 <-> Image: 0126
+DB: 0010 <-> Image: 0610
