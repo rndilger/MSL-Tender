@@ -39,7 +39,9 @@ export default async function SamplesPage() {
     .in('sample_id', sampleIds)
 
   // Create a map of sample_id to image_url
-  const imageMap = new Map(images?.map(img => [img.sample_id, img.image_url]))
+  const imageMap = new Map(
+    (images as Array<{ sample_id: string; image_url: string }> | null)?.map(img => [img.sample_id, img.image_url]) || []
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">
