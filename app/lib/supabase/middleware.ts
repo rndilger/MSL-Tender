@@ -35,36 +35,6 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Skip admin checks for auth callback route
-  if (request.nextUrl.pathname === '/auth/callback') {
-    return supabaseResponse
-  }
-
-  // Protected admin routes
-  if (request.nextUrl.pathname.startsWith('/admin') && 
-      !request.nextUrl.pathname.startsWith('/admin/login')) {
-    if (!user) {
-      // No user, redirect to login
-      const url = request.nextUrl.clone()
-      url.pathname = '/admin/login'
-      return NextResponse.redirect(url)
-    }
-
-    // Check if user is an active admin
-    const { data: adminUser } = await supabase
-      .from('admin_users')
-      .select('is_active')
-      .eq('id', user.id)
-      .single()
-
-    if (!adminUser || !adminUser.is_active) {
-      // Not an admin or inactive, redirect to login
-      const url = request.nextUrl.clone()
-      url.pathname = '/admin/login'
-      return NextResponse.redirect(url)
-    }
-  }
-
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
   // creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:

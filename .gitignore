@@ -111,7 +111,8 @@ study files/
 # Consolidated data files (contain sensitive research data)
 database/consolidated_data*.csv
 
-# Upload scripts with credentials (contains Supabase keys)
+# Upload scripts - now safe (credentials moved to .env)
+# scripts/upload_images_to_supabase.py (legacy - still has hardcoded credentials)
 scripts/upload_images_to_supabase.py
 
 # Validation reports (can be regenerated)
