@@ -61,10 +61,11 @@ export default function AdminLogin() {
       }
 
       // Send magic link
+      const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${redirectUrl}/auth/callback`,
         },
       })
 
