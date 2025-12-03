@@ -11,13 +11,11 @@ type AdminUser = {
 export default async function AdminDashboard() {
   const supabase = await createClient()
   
-  // TEMPORARY: Skip auth check for testing
-  // const { data: { user } } = await supabase.auth.getUser()
-  // if (!user) {
-  //   redirect('/admin/login')
-  // }
-  
-  const user = { id: '54591b94-a7fe-4cd1-adfc-b835f5e8315c' } // Your actual user ID
+  // Check if user is authenticated
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    redirect('/admin/login')
+  }
 
   // Check if user is an active admin
   const { data: adminUser } = await supabase
