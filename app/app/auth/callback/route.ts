@@ -1,26 +1,27 @@
 import { createServerClient } from '@supabase/ssr'
-import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { NextResponse, type NextRequest } from 'next/server'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
   const origin = requestUrl.origin
 
   if (code) {
-    const cookieStore = await cookies()
+    // Create response that we'll set cookies on
+    const response = NextResponse.redirect(`${origin}/admin/dashboard`)
+    
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
           getAll() {
-            return cookieStore.getAll()
+            return request.cookies.getAll()
           },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, options)
+            })
           },
         },
       }
@@ -32,8 +33,10 @@ export async function GET(request: Request) {
       console.error('Auth callback error:', error)
       return NextResponse.redirect(`${origin}/admin/login?error=${error.message}`)
     }
+
+    return response
   }
 
-  // URL to redirect to after sign in process completes
-  return NextResponse.redirect(`${origin}/admin/dashboard`)
+  // No code present, redirect to login
+  return NextResponse.redirect(`${origin}/admin/login`)
 }
