@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -17,6 +17,20 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const router = useRouter()
+
+  // Check for error in URL hash (from Supabase redirect)
+  useEffect(() => {
+    const hash = window.location.hash
+    if (hash.includes('error=')) {
+      const params = new URLSearchParams(hash.substring(1))
+      const error = params.get('error')
+      const errorDescription = params.get('error_description')
+      console.error('Auth error from URL:', error, errorDescription)
+      setMessage(`Authentication error: ${errorDescription || error}`)
+      // Clear the hash
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+  }, [])
 
   const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -60,17 +74,24 @@ export default function AdminLogin() {
         return
       }
 
-      // Send magic link
+      // Send magic link with explicit PKCE flow
       const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
+      console.log('Sending magic link with redirectUrl:', `${redirectUrl}/auth/callback`)
+      
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           emailRedirectTo: `${redirectUrl}/auth/callback`,
+          shouldCreateUser: false, // Don't create new users, only allow whitelisted
         },
       })
 
-      if (error) throw error
+      if (error) {
+        console.error('Magic link error:', error)
+        throw error
+      }
 
+      console.log('Magic link sent successfully')
       setMessage('Check your email for the login link!')
     } catch (error) {
       setMessage('Error sending login link. Please try again.')
