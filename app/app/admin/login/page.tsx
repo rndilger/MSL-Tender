@@ -1,13 +1,17 @@
 ﻿'use client'
 
 import { useState, useEffect } from 'react'
-import { login } from './actions'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
 export default function AdminLogin() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const router = useRouter()
 
   useEffect(() => {
     const hash = window.location.hash
@@ -21,24 +25,68 @@ export default function AdminLogin() {
     }
   }, [])
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
     setLoading(true)
     setMessage('')
 
-    const formData = new FormData(event.currentTarget)
+    const supabase = createClient()
+
+    // Validate @illinois.edu domain
+    if (!email.endsWith('@illinois.edu')) {
+      setMessage('Please use your @illinois.edu email address')
+      setLoading(false)
+      return
+    }
+
+    if (!password) {
+      setMessage('Please enter your password')
+      setLoading(false)
+      return
+    }
 
     try {
-      const result = await login(formData)
-      
-      if (result?.error) {
-        setMessage(result.error)
+      console.log('[Password Login] Attempting login for:', email)
+
+      // Sign in with password
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (error) {
+        console.error('[Password Login] Error:', error)
+        setMessage('Invalid email or password')
         setLoading(false)
+        return
       }
-      // If successful, redirect() in the server action will handle navigation
+
+      console.log('[Password Login] Success! User:', data.user?.email)
+      console.log('[Password Login] Session:', data.session ? 'Present' : 'Missing')
+      
+      // Check admin_users table
+      const { data: adminUser, error: adminError } = await supabase
+        .from('admin_users')
+        .select('*')
+        .eq('id', data.user.id)
+        .single()
+      
+      console.log('[Password Login] Admin user check:', adminUser ? 'Found' : 'Not found', adminError)
+      
+      if (!adminUser) {
+        setMessage('User authenticated but not in admin whitelist. Please contact administrator.')
+        setLoading(false)
+        return
+      }
+
+      console.log('[Password Login] All checks passed, redirecting to dashboard...')
+      
+      // Use Next.js router to navigate
+      router.push('/admin/dashboard')
+      router.refresh()
     } catch (error) {
-      console.error('Login error:', error)
       setMessage('An unexpected error occurred. Please try again.')
+      console.error('Login error:', error)
       setLoading(false)
     }
   }
@@ -55,7 +103,7 @@ export default function AdminLogin() {
           </p>
         </div>
         
-        <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+        <form onSubmit={handleLogin} className="mt-8 space-y-6">
           <div>
             <label htmlFor="email" className="sr-only">
               Email address
@@ -66,6 +114,8 @@ export default function AdminLogin() {
               type="email"
               autoComplete="email"
               required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-green-500 focus:border-green-500 focus:z-10 sm:text-sm"
               placeholder="your.email@illinois.edu"
             />
@@ -81,6 +131,8 @@ export default function AdminLogin() {
               type="password"
               autoComplete="current-password"
               required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-green-500 focus:border-green-500 focus:z-10 sm:text-sm"
               placeholder="Password"
             />
