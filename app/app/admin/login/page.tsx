@@ -81,6 +81,9 @@ export default function AdminLogin() {
       }
 
       console.log('[Password Login] All checks passed, redirecting to dashboard...')
+      
+      // Wait a brief moment for cookies to be set, then redirect
+      await new Promise(resolve => setTimeout(resolve, 500))
       window.location.href = '/admin/dashboard'
     } catch (error) {
       setMessage('Error sending login link. Please try again.')
