@@ -81,9 +81,9 @@ export default function AdminLogin() {
 
       console.log('[Password Login] All checks passed, redirecting to dashboard...')
       
-      // Use Next.js router to navigate
-      router.push('/admin/dashboard')
-      router.refresh()
+      // Give the session time to fully establish before redirecting
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      window.location.href = '/admin/dashboard'
     } catch (error) {
       setMessage('An unexpected error occurred. Please try again.')
       console.error('Login error:', error)
