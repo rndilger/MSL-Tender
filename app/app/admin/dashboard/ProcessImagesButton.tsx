@@ -29,17 +29,30 @@ export default function ProcessImagesButton() {
       const response = await fetch(url, { method: 'POST' })
       const result = await response.json()
       
+      console.log('API Response:', { status: response.status, result })
+      
       if (response.ok) {
         setMessage(`Success! Cropped ${result.processed} images. Failed: ${result.failed}`)
         await fetchStatus()
       } else {
         const errorDetails = result.details || result.error || 'Unknown error'
-        setMessage(`Error: ${errorDetails}`)
-        console.error('Full error response:', result)
+        const exitCode = result.exitCode ? ` (exit code: ${result.exitCode})` : ''
+        setMessage(`Error: ${errorDetails}${exitCode}`)
+        console.error('Full error response:', JSON.stringify(result, null, 2))
+        
+        // Show additional debug info if available
+        if (result.output) {
+          console.error('Python output:', result.output)
+        }
+        if (result.stack) {
+          console.error('Stack trace:', result.stack)
+        }
       }
     } catch (error) {
-      console.error('Error cropping images:', error)
-      setMessage('Failed to crop images. Check console for details.')
+      console.error('Exception during image cropping:', error)
+      console.error('Error type:', error?.constructor?.name)
+      console.error('Error message:', error instanceof Error ? error.message : String(error))
+      setMessage(`Failed to crop images: ${error instanceof Error ? error.message : 'Unknown error'}. Check console for details.`)
     } finally {
       setProcessing(false)
     }
