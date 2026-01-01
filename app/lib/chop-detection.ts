@@ -9,8 +9,8 @@ interface CropCoordinates {
 }
 
 /**
- * Detect chop boundaries and remove background
- * Looks for pink/red meat, excludes white paper tags
+ * Detect chop boundaries using GrabCut-inspired approach
+ * Uses initial color-based mask then refines with morphological operations
  */
 export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordinates> {
   try {
@@ -34,72 +34,67 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       .ensureAlpha()
       .toBuffer({ resolveWithObject: true });
     
-    // Create a binary mask for pixels that are NOT blue background
-    // This preserves the entire chop including fat and marbling
-    const mask = new Uint8Array(width * height);
+    // Create initial trimap: definite background (0), possible foreground (128), definite foreground (255)
+    const trimap = new Uint8Array(width * height);
     
+    // Initialize with probable background
+    trimap.fill(0);
+    
+    // Mark non-blue pixels as probable foreground
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4; // RGBA format
+        const idx = (y * width + x) * 4;
         const r = data[idx];
         const g = data[idx + 1];
         const b = data[idx + 2];
         
-        // Detect blue background: must be clearly blue
-        // Blue must dominate both red AND green to avoid catching meat colors
-        const isBlueBackground = 
-          b > 85 &&                       // Blue channel (raised from 70)
-          b > r + 10 &&                   // Blue clearly more than red
-          b > g + 10;                     // Blue clearly more than green
+        // Very conservative blue detection - only mark obvious blue as background
+        const isDefiniteBlue = b > 140 && b > r + 30 && b > g + 25;
         
-        // Keep everything that's NOT blue background
-        // This includes meat, fat, marbling, and paper tag (we'll filter tag by size)
-        if (!isBlueBackground) {
-          mask[y * width + x] = 1;
+        if (!isDefiniteBlue) {
+          trimap[y * width + x] = 128; // Probable foreground
         }
       }
     }
     
-    // Apply morphological operations to clean up mask
-    // Step 1: Erosion to remove noise and separate tag from chop
-    const eroded = new Uint8Array(width * height);
-    const kernelSize = 7;
-    const kernelRadius = Math.floor(kernelSize / 2);
+    // Erode the probable foreground to find definite foreground (core chop region)
+    const definite_fg = new Uint8Array(width * height);
+    const erodeKernel = 15;
+    const erodeRadius = Math.floor(erodeKernel / 2);
     
-    for (let y = kernelRadius; y < height - kernelRadius; y++) {
-      for (let x = kernelRadius; x < width - kernelRadius; x++) {
-        let sum = 0;
-        for (let ky = -kernelRadius; ky <= kernelRadius; ky++) {
-          for (let kx = -kernelRadius; kx <= kernelRadius; kx++) {
-            sum += mask[(y + ky) * width + (x + kx)];
+    for (let y = erodeRadius; y < height - erodeRadius; y++) {
+      for (let x = erodeRadius; x < width - erodeRadius; x++) {
+        let allForeground = true;
+        for (let dy = -erodeRadius; dy <= erodeRadius; dy++) {
+          for (let dx = -erodeRadius; dx <= erodeRadius; dx++) {
+            if (trimap[(y + dy) * width + (x + dx)] !== 128) {
+              allForeground = false;
+              break;
+            }
           }
+          if (!allForeground) break;
         }
-        // Require high percentage of neighbors to be chop pixels
-        eroded[y * width + x] = sum > (kernelSize * kernelSize * 0.7) ? 1 : 0;
+        if (allForeground) {
+          definite_fg[y * width + x] = 1;
+        }
       }
     }
     
-    // Step 2: After finding largest component, dilate it to reclaim edge pixels
-    const cleaned = eroded;
-    
-    // Find connected components and keep only the largest one (the chop)
-    // This removes the paper tag which is a separate component
+    // Find connected components of definite foreground
     const labels = new Int32Array(width * height);
     let currentLabel = 1;
     const componentSizes = new Map<number, number>();
     
-    // Simple flood-fill labeling
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (cleaned[y * width + x] === 1 && labels[y * width + x] === 0) {
-          // Start flood fill
+        if (definite_fg[y * width + x] === 1 && labels[y * width + x] === 0) {
           const stack = [[x, y]];
           let componentSize = 0;
           
           while (stack.length > 0) {
             const [cx, cy] = stack.pop()!;
             if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-            if (labels[cy * width + cx] !== 0 || cleaned[cy * width + cx] !== 1) continue;
+            if (labels[cy * width + cx] !== 0 || definite_fg[cy * width + cx] !== 1) continue;
             
             labels[cy * width + cx] = currentLabel;
             componentSize++;
@@ -116,7 +111,7 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       }
     }
     
-    // Find the largest component (should be the chop)
+    // Find largest component
     let largestLabel = 0;
     let largestSize = 0;
     for (const [label, size] of componentSizes) {
@@ -126,21 +121,12 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       }
     }
     
-    // Require that the largest component is significantly larger than others
-    // This helps filter out cases where the tag is picked up
-    const secondLargestSize = Math.max(...Array.from(componentSizes.values()).filter(s => s !== largestSize));
-    if (largestLabel === 0 || largestSize < secondLargestSize * 3) {
-      console.warn(`No clear chop component detected in image: ${imageUrl}`);
-      return {
-        x1: 0,
-        y1: 0,
-        x2: 0,
-        y2: 0,
-        confidence: 0
-      };
+    if (largestLabel === 0) {
+      console.warn(`No definite foreground detected in image: ${imageUrl}`);
+      return { x1: 0, y1: 0, x2: 0, y2: 0, confidence: 0 };
     }
     
-    // Find bounding box of the largest component
+    // Find bounding box of the definite foreground
     let minX = width;
     let minY = height;
     let maxX = 0;
@@ -157,9 +143,9 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       }
     }
     
-    // Add minimal margin around detected region - tighter crop
-    const marginX = Math.round((maxX - minX) * 0.01);
-    const marginY = Math.round((maxY - minY) * 0.01);
+    // Add 5% margin to allow for edge refinement
+    const marginX = Math.round((maxX - minX) * 0.05);
+    const marginY = Math.round((maxY - minY) * 0.05);
     
     const x1 = Math.max(0, minX - marginX);
     const y1 = Math.max(0, minY - marginY);
@@ -173,7 +159,7 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
     
     let confidence = 0.5;
     if (chopAreaRatio > 0.15 && chopAreaRatio < 0.7) confidence += 0.2;
-    if (fillRatio > 0.5) confidence += 0.3;
+    if (fillRatio > 0.3) confidence += 0.3;
     
     console.log(`Detected chop: (${x1},${y1}) to (${x2},${y2}), confidence: ${confidence.toFixed(2)}`);
     
@@ -230,7 +216,47 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
     }
   }
   
-  // Apply morphological cleaning - erosion to separate tag from chop
+  // Apply morphological closing first to fill small blue holes inside the chop
+  const closed = new Uint8Array(width * height);
+  const closeKernel = 3;
+  const closeRadius = Math.floor(closeKernel / 2);
+  
+  // Dilation
+  const dilatedTemp = new Uint8Array(width * height);
+  for (let y = closeRadius; y < height - closeRadius; y++) {
+    for (let x = closeRadius; x < width - closeRadius; x++) {
+      let hasAny = 0;
+      for (let ky = -closeRadius; ky <= closeRadius; ky++) {
+        for (let kx = -closeRadius; kx <= closeRadius; kx++) {
+          if (mask[(y + ky) * width + (x + kx)] === 1) {
+            hasAny = 1;
+            break;
+          }
+        }
+        if (hasAny) break;
+      }
+      dilatedTemp[y * width + x] = hasAny;
+    }
+  }
+  
+  // Erosion (to complete closing operation)
+  for (let y = closeRadius; y < height - closeRadius; y++) {
+    for (let x = closeRadius; x < width - closeRadius; x++) {
+      let allPresent = 1;
+      for (let ky = -closeRadius; ky <= closeRadius; ky++) {
+        for (let kx = -closeRadius; kx <= closeRadius; kx++) {
+          if (dilatedTemp[(y + ky) * width + (x + kx)] !== 1) {
+            allPresent = 0;
+            break;
+          }
+        }
+        if (!allPresent) break;
+      }
+      closed[y * width + x] = allPresent;
+    }
+  }
+  
+  // Apply morphological opening - erosion then dilation to separate tag from chop
   const eroded = new Uint8Array(width * height);
   const kernelSize = 7;
   const kernelRadius = Math.floor(kernelSize / 2);
@@ -240,7 +266,7 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
       let sum = 0;
       for (let ky = -kernelRadius; ky <= kernelRadius; ky++) {
         for (let kx = -kernelRadius; kx <= kernelRadius; kx++) {
-          sum += mask[(y + ky) * width + (x + kx)];
+          sum += closed[(y + ky) * width + (x + kx)];
         }
       }
       eroded[y * width + x] = sum > (kernelSize * kernelSize * 0.7) ? 1 : 0;
@@ -290,22 +316,31 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
     }
   }
   
-  // Dilate the largest component to reclaim edge pixels
-  // Use moderate dilation to avoid removing internal chop structure
-  const dilated = new Uint8Array(width * height);
-  const dilateKernel = 12; // Reduced from 20 to avoid over-expansion
-  const dilateRadius = Math.floor(dilateKernel / 2);
+  // GrabCut-style iterative refinement: expand the mask and check each pixel
+  // More aggressive expansion to capture all edge pixels
+  const refined = new Uint8Array(width * height);
+  const expandKernel = 25; // Very aggressive expansion
+  const expandRadius = Math.floor(expandKernel / 2);
   
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (labels[y * width + x] === largestLabel) {
-        // Expand this pixel's influence to neighbors
-        for (let dy = -dilateRadius; dy <= dilateRadius; dy++) {
-          for (let dx = -dilateRadius; dx <= dilateRadius; dx++) {
+        // For each chop pixel, expand and mark neighbors as potential chop
+        for (let dy = -expandRadius; dy <= expandRadius; dy++) {
+          for (let dx = -expandRadius; dx <= expandRadius; dx++) {
             const ny = y + dy;
             const nx = x + dx;
             if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-              dilated[ny * width + nx] = 1;
+              const nidx = (ny * width + nx) * 4;
+              const nr = data[nidx];
+              const ng = data[nidx + 1];
+              const nb = data[nidx + 2];
+              
+              // Only include if NOT clearly blue
+              const isDefinitelyBlue = nb > 140 && nb > nr + 30 && nb > ng + 25;
+              if (!isDefinitelyBlue) {
+                refined[ny * width + nx] = 1;
+              }
             }
           }
         }
@@ -313,28 +348,8 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
     }
   }
   
-  // Additionally, only replace pixels that are NOT meat-colored
-  // This prevents removing internal chop components
-  const finalMask = new Uint8Array(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-      
-      // Check if this pixel is blue background
-      const isBlue = b > 85 && b > r + 10 && b > g + 10;
-      
-      // Include pixel if: in dilated mask AND not blue background
-      // OR if it's inside the original chop component (preserve interior)
-      if (dilated[y * width + x] === 1 && !isBlue) {
-        finalMask[y * width + x] = 1;
-      } else if (labels[y * width + x] === largestLabel) {
-        finalMask[y * width + x] = 1;
-      }
-    }
-  }
+  // Create final mask output
+  const finalMask = refined;
   
   // Create alpha channel - use final mask
   const outputData = Buffer.alloc(width * height * 4);
