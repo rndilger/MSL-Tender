@@ -45,12 +45,11 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
         const g = data[idx + 1];
         const b = data[idx + 2];
         
-        // Detect blue background: extremely aggressive detection
+        // Detect blue background: ultra aggressive detection
         // Catch all shades of blue including very light/dark variants
         const isBlueBackground = 
-          b > 80 &&                       // Blue channel (lowered from 90)
-          b >= r &&                       // Blue at least as much as red
-          b >= g;                         // Blue at least as much as green
+          b > 70 &&                       // Blue channel (lowered from 80)
+          (b >= r || b >= g);            // Blue at least equal to red OR green
         
         // Keep everything that's NOT blue background
         // This includes meat, fat, marbling, and paper tag (we'll filter tag by size)
@@ -219,9 +218,8 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
       
       // Same blue background detection as in detectChopBoundaries
       const isBlueBackground = 
-        b > 80 &&
-        b >= r &&
-        b >= g;
+        b > 70 &&
+        (b >= r || b >= g);
       
       // Keep everything that's NOT blue background
       if (!isBlueBackground) {
@@ -293,7 +291,7 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
   // Dilate the largest component to reclaim edge pixels
   // This helps remove remaining blue pixels at the boundaries
   const dilated = new Uint8Array(width * height);
-  const dilateKernel = 15; // Increased from 10 for even more aggressive edge removal
+  const dilateKernel = 20; // Increased from 15 for ultra aggressive edge removal
   const dilateRadius = Math.floor(dilateKernel / 2);
   
   for (let y = 0; y < height; y++) {
