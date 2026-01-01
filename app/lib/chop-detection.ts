@@ -34,8 +34,8 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       .ensureAlpha()
       .toBuffer({ resolveWithObject: true });
     
-    // Create a binary mask for pixels that match chop color
-    // Exclude both blue background AND white paper tags
+    // Create a binary mask for pixels that are NOT blue background
+    // This preserves the entire chop including fat and marbling
     const mask = new Uint8Array(width * height);
     
     for (let y = 0; y < height; y++) {
@@ -45,17 +45,16 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
         const g = data[idx + 1];
         const b = data[idx + 2];
         
-        // Detect pink/red meat color - be more specific
-        const isChopColor = 
-          r >= 120 && r <= 255 &&           // Red in reasonable range
-          g >= 80 && g <= 200 &&            // Green in reasonable range
-          b >= 80 && b <= 180 &&            // Blue in reasonable range (less than red)
-          r > b + 20 &&                     // Red significantly more than blue
-          r > g - 30 &&                     // Red at least as much as green
-          !(r > 230 && g > 230 && b > 230) && // Not white (paper tag)
-          !(b > r + 20);                    // Not blue background
+        // Detect blue background: high blue channel, blue dominates red/green
+        // Everything else (chop, fat, marbling) is NOT blue background
+        const isBlueBackground = 
+          b > 120 &&                      // Blue channel high enough
+          b > r + 15 &&                   // Blue significantly more than red
+          b > g + 10;                     // Blue more than green
         
-        if (isChopColor) {
+        // Keep everything that's NOT blue background
+        // This includes meat, fat, marbling, and paper tag (we'll filter tag by size)
+        if (!isBlueBackground) {
           mask[y * width + x] = 1;
         }
       }
@@ -205,7 +204,7 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
   // Get raw pixel data
   const { data } = await image.raw().ensureAlpha().toBuffer({ resolveWithObject: true });
   
-  // Create mask for chop pixels
+  // Create mask for chop pixels (everything that's NOT blue background)
   const mask = new Uint8Array(width * height);
   
   for (let y = 0; y < height; y++) {
@@ -215,17 +214,14 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
       const g = data[idx + 1];
       const b = data[idx + 2];
       
-      // Same color detection as in detectChopBoundaries
-      const isChopColor = 
-        r >= 120 && r <= 255 &&
-        g >= 80 && g <= 200 &&
-        b >= 80 && b <= 180 &&
-        r > b + 20 &&
-        r > g - 30 &&
-        !(r > 230 && g > 230 && b > 230) &&
-        !(b > r + 20);
+      // Same blue background detection as in detectChopBoundaries
+      const isBlueBackground = 
+        b > 120 &&
+        b > r + 15 &&
+        b > g + 10;
       
-      if (isChopColor) {
+      // Keep everything that's NOT blue background
+      if (!isBlueBackground) {
         mask[y * width + x] = 1;
       }
     }
