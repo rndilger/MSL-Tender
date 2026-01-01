@@ -1,15 +1,6 @@
-// Run from app directory where @aws-sdk is installed
-// Usage: cd app && node --import tsx/esm ../scripts/cleanup-r2-folders.ts
 import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Load .env from project root
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID!;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID!;
@@ -26,7 +17,7 @@ const r2Client = new S3Client({
 });
 
 async function deleteFolder(prefix: string) {
-  console.log(`\nDeleting folder: ${prefix}`);
+  console.log(`[R2 Cleanup] Deleting folder: ${prefix}`);
   
   let continuationToken: string | undefined;
   let totalDeleted = 0;
@@ -43,7 +34,7 @@ async function deleteFolder(prefix: string) {
     const listResponse = await r2Client.send(listCommand);
     
     if (!listResponse.Contents || listResponse.Contents.length === 0) {
-      console.log(`No objects found in ${prefix}`);
+      console.log(`[R2 Cleanup] No objects found in ${prefix}`);
       break;
     }
     
@@ -61,37 +52,59 @@ async function deleteFolder(prefix: string) {
     const deleteResponse = await r2Client.send(deleteCommand);
     totalDeleted += objects.length;
     
-    console.log(`Deleted ${objects.length} objects (total: ${totalDeleted})`);
+    console.log(`[R2 Cleanup] Deleted ${objects.length} objects (total: ${totalDeleted})`);
     
     if (deleteResponse.Errors && deleteResponse.Errors.length > 0) {
-      console.error('Errors during deletion:', deleteResponse.Errors);
+      console.error('[R2 Cleanup] Errors during deletion:', deleteResponse.Errors);
     }
     
     continuationToken = listResponse.NextContinuationToken;
   } while (continuationToken);
   
-  console.log(`Finished deleting ${prefix} - Total objects deleted: ${totalDeleted}`);
+  return totalDeleted;
 }
 
-async function main() {
-  console.log('R2 Cleanup Script');
-  console.log('=================\n');
-  
-  // Delete the incorrectly created folders
-  const foldersToDelete = [
-    'photos/processed/',
-    'processed/original/',
-  ];
-  
-  for (const folder of foldersToDelete) {
-    try {
-      await deleteFolder(folder);
-    } catch (error) {
-      console.error(`Error deleting ${folder}:`, error);
+export async function POST() {
+  try {
+    const supabase = await createClient();
+    
+    // Check authentication
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    
+    console.log('[R2 Cleanup] Starting cleanup...');
+    
+    // Delete the incorrectly created folders
+    const foldersToDelete = [
+      'photos/processed/',
+      'processed/original/',
+    ];
+    
+    const results: Record<string, number> = {};
+    
+    for (const folder of foldersToDelete) {
+      try {
+        const deleted = await deleteFolder(folder);
+        results[folder] = deleted;
+      } catch (error) {
+        console.error(`[R2 Cleanup] Error deleting ${folder}:`, error);
+        results[folder] = -1;
+      }
+    }
+    
+    console.log('[R2 Cleanup] Cleanup complete!', results);
+    
+    return NextResponse.json({
+      message: 'Cleanup complete',
+      results
+    });
+  } catch (error) {
+    console.error('[R2 Cleanup] Error:', error);
+    return NextResponse.json({ 
+      error: 'Failed to cleanup R2',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
-  
-  console.log('\nCleanup complete!');
 }
-
-main().catch(console.error);
