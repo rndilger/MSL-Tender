@@ -2,6 +2,10 @@ import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import sharp from 'sharp'
 
+type ImageData = {
+  image_url: string
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -22,7 +26,7 @@ export async function GET(request: Request) {
       .from('sample_images')
       .select('image_url')
       .eq('id', id)
-      .single()
+      .single<ImageData>()
 
     if (error || !image) {
       return NextResponse.json({ error: 'Image not found' }, { status: 404 })
