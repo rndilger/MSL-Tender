@@ -57,7 +57,6 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
         
         if (isChopColor) {
           mask[y * width + x] = 1;
-          pixelCount++;
         }
       }
     }
