@@ -1,7 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import { spawn } from 'child_process'
-import path from 'path'
 
 interface ImageRecord {
   id: number
@@ -72,61 +70,29 @@ export async function POST(request: Request) {
     const imageRecords = selectedImages as ImageRecord[]
     const imageUrls = imageRecords.map(img => img.image_url)
 
-    // Call Python script - handle both local and Vercel paths
-    const scriptPath = path.join(process.cwd(), '../scripts/chop_detection.py')
-    console.log('Script path:', scriptPath)
-    console.log('Current working directory:', process.cwd())
-    console.log('Processing', imageUrls.length, 'images in', isTestMode ? 'TEST' : 'PRODUCTION', 'mode')
+    // Call Python API endpoint (Vercel Python function)
+    console.log('[Process Images] Calling Python API with', imageUrls.length, 'URLs')
+    const pythonApiUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}/api/crop-detect`
+      : 'http://localhost:3000/api/crop-detect'
     
-    const pythonProcess = spawn('python', [scriptPath], {
-      stdio: ['pipe', 'pipe', 'pipe']
+    const pythonResponse = await fetch(pythonApiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls: imageUrls })
     })
 
-    // Send URLs as JSON to stdin
-    pythonProcess.stdin.write(JSON.stringify(imageUrls))
-    pythonProcess.stdin.end()
-
-    // Collect output
-    let output = ''
-    let errorOutput = ''
-
-    pythonProcess.stdout.on('data', (data) => {
-      output += data.toString()
-    })
-
-    pythonProcess.stderr.on('data', (data) => {
-      errorOutput += data.toString()
-    })
-
-    // Wait for process to complete
-    const exitCode = await new Promise((resolve) => {
-      pythonProcess.on('close', resolve)
-    })
-
-    if (exitCode !== 0) {
-      console.error('Python script error:', errorOutput)
-      console.error('Python script stdout:', output)
-      console.error('Exit code:', exitCode)
-      return NextResponse.json({ 
-        error: 'Image processing failed',
-        details: errorOutput || 'Python script exited with non-zero code',
-        exitCode
-      }, { status: 500 })
-    }
-
-    // Parse results
-    let results
-    try {
-      results = JSON.parse(output)
-    } catch (parseError) {
-      console.error('Failed to parse Python output:', output)
-      console.error('Parse error:', parseError)
+    if (!pythonResponse.ok) {
+      const errorText = await pythonResponse.text()
+      console.error('[Process Images] Python API error:', errorText)
       return NextResponse.json({
-        error: 'Failed to parse processing results',
-        details: 'Python script output was not valid JSON',
-        output: output.substring(0, 500)
+        error: 'Python processing failed',
+        details: errorText
       }, { status: 500 })
     }
+
+    const results = await pythonResponse.json()
+    console.log('[Process Images] Python API returned', results.length, 'results')
 
     // Update database with results
     const updates = []
