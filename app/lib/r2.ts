@@ -34,6 +34,8 @@ export async function uploadProcessedImage(
 ): Promise<UploadResult> {
   const key = `photos/processed/${studyNumber}/${filename}`;
   
+  console.log(`[R2] Uploading to key: ${key}, size: ${buffer.length} bytes`);
+  
   const command = new PutObjectCommand({
     Bucket: R2_BUCKET_NAME,
     Key: key,
@@ -43,6 +45,7 @@ export async function uploadProcessedImage(
   });
 
   await r2Client.send(command);
+  console.log(`[R2] Upload successful: ${key}`);
 
   const url = `${R2_PUBLIC_URL}/${key}`;
   

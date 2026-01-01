@@ -64,7 +64,11 @@ export default async function CropTestPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {images.map((image) => {
               // Use processed URL directly if available, otherwise fallback to API endpoint
-              const croppedUrl = image.processed_image_url || `/api/crop-image?id=${image.id}`
+              // Add cache-busting timestamp for reprocessed images
+              const cacheBust = image.processed_at ? `?t=${new Date(image.processed_at).getTime()}` : ''
+              const croppedUrl = image.processed_image_url 
+                ? `${image.processed_image_url}${cacheBust}`
+                : `/api/crop-image?id=${image.id}`
               const confidence = Math.round((image.crop_confidence || 0) * 100)
               
               return (
