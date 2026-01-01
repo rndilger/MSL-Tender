@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 export default function ProcessImagesButton() {
+  const router = useRouter()
   const [processing, setProcessing] = useState(false)
   const [status, setStatus] = useState<{ total: number; processed: number; remaining: number } | null>(null)
   const [message, setMessage] = useState<string>('')
@@ -34,6 +36,13 @@ export default function ProcessImagesButton() {
       if (response.ok) {
         setMessage(`Success! Cropped ${result.processed} images. Failed: ${result.failed}`)
         await fetchStatus()
+        
+        // If in test mode, redirect to the crop test results page
+        if (testMode) {
+          setTimeout(() => {
+            router.push('/admin/crop-test')
+          }, 1000)
+        }
       } else {
         const errorDetails = result.details || result.error || 'Unknown error'
         const exitCode = result.exitCode ? ` (exit code: ${result.exitCode})` : ''
