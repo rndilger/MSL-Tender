@@ -1,530 +1,827 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable react-hooks/exhaustive-deps */
 'use client'
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import Image from 'next/image'
 import Link from 'next/link'
 import ThemeToggle from '@/app/components/ThemeToggle'
 
-type Sample = {
-  id: string
-  study_number: number
-  standardized_chop_id: string
-  chop_color: number | null
-  chop_marbling: number | null
-  chop_firmness: number | null
-  ph: number | null
-  minolta_chop_l: number | null
-  minolta_chop_a: number | null
-  minolta_chop_b: number | null
-  moisture_percent: number | null
-  fat_percent: number | null
-  image_url?: string
+type FilterCriteria = {
+  studyNumbers: number[]
+  minoLRange: { min: number; max: number } | null
+  minoARange: { min: number; max: number } | null
+  minoBRange: { min: number; max: number } | null
+  colorRange: { min: number; max: number } | null
+  marblingRange: { min: number; max: number } | null
+  firmnessRange: { min: number; max: number } | null
+  phRange: { min: number; max: number } | null
+}
+
+type ExperimentConfig = {
+  name: string
+  description: string
+  type: string
+  numberOfSets: number
+  samplingStrategy: 'random' | 'stratified'
 }
 
 export default function CreateExperimentPage() {
   const router = useRouter()
   const supabase = createClient()
+  const [user, setUser] = useState<any>(null)
   
-  const [samples, setSamples] = useState<Sample[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selectedSamples, setSelectedSamples] = useState<Set<string>>(new Set())
-  const [searchTerm, setSearchTerm] = useState('')
-  const [studyFilter, setStudyFilter] = useState<number | null>(null)
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [availableStudies, setAvailableStudies] = useState<number[]>([])
+  const [matchingCount, setMatchingCount] = useState<number>(0)
+  const [loading, setLoading] = useState(false)
   
-  // Minolta color filters
-  const [minoLFilter, setMinoLFilter] = useState<{ min: number; max: number } | null>(null)
-  const [minoAFilter, setMinoAFilter] = useState<{ min: number; max: number } | null>(null)
-  const [minoBFilter, setMinoBFilter] = useState<{ min: number; max: number } | null>(null)
+  // Step 1: Filter criteria
+  const [filters, setFilters] = useState<FilterCriteria>({
+    studyNumbers: [],
+    minoLRange: null,
+    minoARange: null,
+    minoBRange: null,
+    colorRange: null,
+    marblingRange: null,
+    firmnessRange: null,
+    phRange: null,
+  })
   
-  // Form state
-  const [experimentName, setExperimentName] = useState('')
-  const [description, setDescription] = useState('')
-  const [experimentType, setExperimentType] = useState('paired_comparison')
-  const [randomizeOrder, setRandomizeOrder] = useState(true)
-  const [creating, setCreating] = useState(false)
+  // Step 2: Experiment configuration
+  const [config, setConfig] = useState<ExperimentConfig>({
+    name: '',
+    description: '',
+    type: 'paired_comparison',
+    numberOfSets: 10,
+    samplingStrategy: 'random',
+  })
 
-  const loadSamples = async () => {
+  useEffect(() => {
+    loadUser()
+    loadAvailableStudies()
+  }, [])
+
+  useEffect(() => {
+    if (step === 1) {
+      updateMatchingCount()
+    }
+  }, [filters, step])
+
+  const loadUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    setUser(user)
+  }
+
+  const loadAvailableStudies = async () => {
+    const { data } = await supabase
+      .from('pork_samples')
+      .select('study_number')
+    
+    if (data) {
+      const studies = Array.from(new Set(data.map((s: any) => s.study_number)))
+        .sort((a, b) => a - b)
+      setAvailableStudies(studies)
+    }
+  }
+
+  const updateMatchingCount = async () => {
     setLoading(true)
     
-    // Get all samples with Minolta data
-    const { data: samplesData, error: samplesError } = await supabase
+    let query = supabase
       .from('pork_samples')
-      .select('id, study_number, standardized_chop_id, chop_color, chop_marbling, chop_firmness, ph, minolta_chop_l, minolta_chop_a, minolta_chop_b, moisture_percent, fat_percent')
-      .order('study_number', { ascending: true })
-      .order('standardized_chop_id', { ascending: true })
-
-    if (samplesError) {
-      console.error('Error fetching samples:', samplesError)
-      setLoading(false)
-      return
+      .select('id', { count: 'exact', head: true })
+    
+    // Apply filters
+    if (filters.studyNumbers.length > 0) {
+      query = query.in('study_number', filters.studyNumbers)
     }
-
-    // Get images for samples
-    const sampleIds = samplesData?.map((s: any) => s.id) || []
-    const { data: images, error: imagesError } = await supabase
-      .from('sample_images')
-      .select('sample_id, image_url')
-      .in('sample_id', sampleIds)
-
-    if (imagesError) {
-      console.error('Error fetching images:', imagesError)
+    if (filters.minoLRange) {
+      query = query.gte('minolta_chop_l', filters.minoLRange.min).lte('minolta_chop_l', filters.minoLRange.max)
     }
-    console.log('Fetched images:', images?.length, 'for', sampleIds.length, 'samples')
-    if (images && images.length > 0) {
-      console.log('Sample image URL:', (images as any)[0].image_url)
+    if (filters.minoARange) {
+      query = query.gte('minolta_chop_a', filters.minoARange.min).lte('minolta_chop_a', filters.minoARange.max)
     }
-
-    // Create image map
-    const imageMap = new Map(
-      images?.map((img: any) => [img.sample_id, img.image_url]) || []
-    )
-
-    // Combine samples with images
-    const samplesWithImages = samplesData?.map((sample: any) => ({
-      ...sample,
-      image_url: imageMap.get(sample.id)
-    })) || []
-
-    console.log('Samples with images:', samplesWithImages.filter(s => s.image_url).length, 'out of', samplesWithImages.length)
-
-    setSamples(samplesWithImages)
-
-    // Get unique study numbers for filter
-    const studies = Array.from(new Set(samplesData?.map((s: any) => s.study_number) || []))
-      .sort((a, b) => a - b)
-    setAvailableStudies(studies)
-
+    if (filters.minoBRange) {
+      query = query.gte('minolta_chop_b', filters.minoBRange.min).lte('minolta_chop_b', filters.minoBRange.max)
+    }
+    if (filters.colorRange) {
+      query = query.gte('chop_color', filters.colorRange.min).lte('chop_color', filters.colorRange.max)
+    }
+    if (filters.marblingRange) {
+      query = query.gte('chop_marbling', filters.marblingRange.min).lte('chop_marbling', filters.marblingRange.max)
+    }
+    if (filters.firmnessRange) {
+      query = query.gte('chop_firmness', filters.firmnessRange.min).lte('chop_firmness', filters.firmnessRange.max)
+    }
+    if (filters.phRange) {
+      query = query.gte('ph', filters.phRange.min).lte('ph', filters.phRange.max)
+    }
+    
+    const { count } = await query
+    setMatchingCount(count || 0)
     setLoading(false)
   }
 
-  useEffect(() => {
-    loadSamples()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const handleCreateExperiment = async () => {
+    if (!config.name || config.numberOfSets < 1) return
 
-  const toggleSample = (sampleId: string) => {
-    const newSelected = new Set(selectedSamples)
-    if (newSelected.has(sampleId)) {
-      newSelected.delete(sampleId)
-    } else {
-      newSelected.add(sampleId)
-    }
-    setSelectedSamples(newSelected)
-  }
-
-  const filteredSamples = samples.filter(sample => {
-    const matchesSearch = sample.standardized_chop_id.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStudy = studyFilter === null || sample.study_number === studyFilter
-    const matchesMinoL = !minoLFilter || (sample.minolta_chop_l !== null && sample.minolta_chop_l >= minoLFilter.min && sample.minolta_chop_l <= minoLFilter.max)
-    const matchesMinoA = !minoAFilter || (sample.minolta_chop_a !== null && sample.minolta_chop_a >= minoAFilter.min && sample.minolta_chop_a <= minoAFilter.max)
-    const matchesMinoB = !minoBFilter || (sample.minolta_chop_b !== null && sample.minolta_chop_b >= minoBFilter.min && sample.minolta_chop_b <= minoBFilter.max)
-    return matchesSearch && matchesStudy && matchesMinoL && matchesMinoA && matchesMinoB
-  })
-
-  const isValidSelection = () => {
-    return selectedSamples.size > 0 && selectedSamples.size % 4 === 0
-  }
-
-  const createExperiment = async () => {
-    if (!experimentName.trim()) {
-      alert('Please enter an experiment name')
-      return
-    }
-
-    if (!isValidSelection()) {
-      alert('Please select a multiple of 4 samples')
-      return
-    }
-
-    setCreating(true)
+    setLoading(true)
 
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        alert('You must be logged in to create an experiment')
-        router.push('/admin/login')
+      // Query samples matching the filter criteria
+      let query = supabase
+        .from('pork_samples')
+        .select('id')
+      
+      if (filters.studyNumbers.length > 0) {
+        query = query.in('study_number', filters.studyNumbers)
+      }
+      if (filters.minoLRange) {
+        query = query.gte('minolta_chop_l', filters.minoLRange.min).lte('minolta_chop_l', filters.minoLRange.max)
+      }
+      if (filters.minoARange) {
+        query = query.gte('minolta_chop_a', filters.minoARange.min).lte('minolta_chop_a', filters.minoARange.max)
+      }
+      if (filters.minoBRange) {
+        query = query.gte('minolta_chop_b', filters.minoBRange.min).lte('minolta_chop_b', filters.minoBRange.max)
+      }
+      if (filters.colorRange) {
+        query = query.gte('chop_color', filters.colorRange.min).lte('chop_color', filters.colorRange.max)
+      }
+      if (filters.marblingRange) {
+        query = query.gte('chop_marbling', filters.marblingRange.min).lte('chop_marbling', filters.marblingRange.max)
+      }
+      if (filters.firmnessRange) {
+        query = query.gte('chop_firmness', filters.firmnessRange.min).lte('chop_firmness', filters.firmnessRange.max)
+      }
+      if (filters.phRange) {
+        query = query.gte('ph', filters.phRange.min).lte('ph', filters.phRange.max)
+      }
+      
+      const { data: filteredSamples, error: queryError } = await query
+      
+      if (queryError) throw queryError
+      if (!filteredSamples || filteredSamples.length === 0) {
+        alert('No samples match the filter criteria')
+        setLoading(false)
         return
+      }
+
+      const samplesNeeded = config.numberOfSets * 4
+      if (filteredSamples.length < samplesNeeded) {
+        alert(`Need ${samplesNeeded} samples but only ${filteredSamples.length} match the criteria`)
+        setLoading(false)
+        return
+      }
+
+      // Apply sampling strategy
+      let selectedSamples: string[]
+      if (config.samplingStrategy === 'random') {
+        // Shuffle and take needed samples
+        const shuffled = [...filteredSamples].sort(() => Math.random() - 0.5)
+        selectedSamples = shuffled.slice(0, samplesNeeded).map((s: any) => s.id)
+      } else {
+        // Stratified sampling - for now, just random
+        // TODO: implement proper stratification based on color/marbling/firmness
+        const shuffled = [...filteredSamples].sort(() => Math.random() - 0.5)
+        selectedSamples = shuffled.slice(0, samplesNeeded).map((s: any) => s.id)
       }
 
       // Create experiment
       const { data: experiment, error: expError } = await supabase
         .from('experiments')
         .insert({
-          name: experimentName,
-          description: description || null,
-          experiment_type: experimentType,
-          num_images: 4, // Default to sets of 4
+          name: config.name,
+          description: config.description,
           status: 'draft',
-          randomize_order: randomizeOrder,
-          collect_timing: true,
-          collect_click_data: true,
-          created_by: user.id
+          type: config.type,
+          created_by: user?.id
         } as any)
         .select()
         .single()
 
-      if (expError) {
-        console.error('Error creating experiment:', expError)
-        alert('Failed to create experiment: ' + expError.message)
-        setCreating(false)
-        return
-      }
+      if (expError) throw expError
 
-      // Add samples to experiment
-      const experimentSamples = Array.from(selectedSamples).map((sampleId, index) => ({
-        experiment_id: (experiment as any).id,
-        sample_id: sampleId,
-        display_order: index,
-        set_number: Math.floor(index / 4) // Group into sets of 4
-      }))
+      // Create comparison sets (groups of 4)
+      const experimentSamples = []
+      for (let i = 0; i < config.numberOfSets; i++) {
+        const setNumber = i + 1
+        const setStart = i * 4
+        for (let j = 0; j < 4; j++) {
+          experimentSamples.push({
+            experiment_id: (experiment as any).id,
+            sample_id: selectedSamples[setStart + j],
+            set_number: setNumber,
+            position_in_set: j + 1
+          })
+        }
+      }
 
       const { error: samplesError } = await supabase
         .from('experiment_samples')
         .insert(experimentSamples as any)
 
-      if (samplesError) {
-        console.error('Error adding samples:', samplesError)
-        alert('Failed to add samples to experiment: ' + samplesError.message)
-        setCreating(false)
-        return
-      }
+      if (samplesError) throw samplesError
 
-      // Success! Redirect to experiment details
-      router.push(`/admin/experiments/${(experiment as any).id}`)
+      // Success!
+      router.push('/admin/experiments')
     } catch (error) {
-      console.error('Error:', error)
-      alert('An unexpected error occurred')
-      setCreating(false)
+      console.error('Error creating experiment:', error)
+      alert('Failed to create experiment')
+      setLoading(false)
     }
   }
 
+  const toggleStudy = (studyNumber: number) => {
+    setFilters(prev => ({
+      ...prev,
+      studyNumbers: prev.studyNumbers.includes(studyNumber)
+        ? prev.studyNumbers.filter(s => s !== studyNumber)
+        : [...prev.studyNumbers, studyNumber]
+    }))
+  }
+
+  const canProceedToStep2 = matchingCount >= config.numberOfSets * 4
+  const canProceedToStep3 = config.name.trim().length > 0 && config.numberOfSets > 0
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
       {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10">
+      <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div>
               <Link 
                 href="/admin/experiments"
-                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-2 inline-block"
+                className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white mb-2 inline-block transition-colors"
               >
                 ← Back to Experiments
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Create New Experiment</h1>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create New Experiment</h1>
             </div>
-            <div className="flex items-center gap-4">
-              <ThemeToggle />
-              <div className="text-sm">
-                <span className={`font-medium ${isValidSelection() ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {selectedSamples.size} samples selected
-                </span>
-                <span className="text-gray-500 dark:text-gray-400 ml-2">
-                  ({selectedSamples.size % 4 === 0 ? '✓' : '✗'} must be multiple of 4)
-                </span>
-              </div>
+            <ThemeToggle />
+          </div>
+          
+          {/* Step Indicator */}
+          <div className="mt-4 flex items-center justify-center">
+            <div className="flex items-center">
+              {[1, 2, 3].map((s, idx) => (
+                <div key={s} className="flex items-center">
+                  <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
+                    step >= s 
+                      ? 'bg-green-500 border-green-500 text-white' 
+                      : 'bg-gray-100 border-gray-300 text-gray-400'
+                  }`}>
+                    {s}
+                  </div>
+                  {idx < 2 && (
+                    <div className={`w-16 h-1 ${
+                      step > s ? 'bg-green-500' : 'bg-gray-300'
+                    }`} />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="ml-6 text-sm text-gray-600 dark:text-gray-400">
+              {step === 1 && 'Define Sample Pool'}
+              {step === 2 && 'Configure Experiment'}
+              {step === 3 && 'Review & Create'}
             </div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left: Experiment Configuration */}
-          <div className="lg:col-span-1">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Experiment Details</h2>
-              
-              {/* Create Button at Top */}
-              <button
-                onClick={createExperiment}
-                disabled={!isValidSelection() || !experimentName.trim() || creating}
-                className="w-full px-4 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium mb-6"
-              >
-                {creating ? 'Creating...' : 'Create Experiment'}
-              </button>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Step 1: Define Sample Pool */}
+        {step === 1 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Step 1: Define Sample Pool
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              Select criteria to filter the pool of samples for this experiment.
+            </p>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Experiment Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={experimentName}
-                    onChange={(e) => setExperimentName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900 font-normal"
-                    placeholder="e.g., Spring 2025 Tenderness Study"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900 font-normal"
-                    placeholder="Optional description..."
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Experiment Type
-                  </label>
-                  <select
-                    value={experimentType}
-                    onChange={(e) => setExperimentType(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900 font-normal"
-                  >
-                    <option value="paired_comparison">Paired Comparison</option>
-                    <option value="ranking">Ranking</option>
-                    <option value="preference">Preference</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="randomize"
-                    checked={randomizeOrder}
-                    onChange={(e) => setRandomizeOrder(e.target.checked)}
-                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="randomize" className="ml-2 text-sm text-gray-700">
-                    Randomize sample order for participants
-                  </label>
-                </div>
-
-                <div className="pt-4 border-t">
-                  <div className="text-sm text-gray-600 space-y-2">
-                    <p><strong>Selected:</strong> {selectedSamples.size} samples</p>
-                    <p><strong>Sets of 4:</strong> {Math.floor(selectedSamples.size / 4)}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Sample Selection */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow overflow-hidden relative">
-              {/* Filters */}
-              <div className="p-4 border-b border-gray-200 sticky top-20 bg-white z-20">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Search
-                    </label>
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search by Chop ID..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900 font-normal"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Filter by Study
-                    </label>
-                    <select
-                      value={studyFilter || ''}
-                      onChange={(e) => setStudyFilter(e.target.value ? Number(e.target.value) : null)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900 font-normal"
+            <div className="space-y-6">
+              {/* Study Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Studies to Include
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {availableStudies.map(study => (
+                    <button
+                      key={study}
+                      onClick={() => toggleStudy(study)}
+                      className={`px-3 py-1 rounded-md text-sm transition-colors ${
+                        filters.studyNumbers.includes(study)
+                          ? 'bg-green-500 text-white'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                      }`}
                     >
-                      <option value="">All Studies</option>
-                      {availableStudies.map(study => (
-                        <option key={study} value={study}>Study {study}</option>
-                      ))}
-                    </select>
+                      Study {study}
+                    </button>
+                  ))}
+                </div>
+                {filters.studyNumbers.length === 0 && (
+                  <p className="text-xs text-gray-500 mt-1">All studies selected (no filter)</p>
+                )}
+              </div>
+
+              {/* Minolta Color Ranges */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Minolta Color Values
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">L* (Lightness: 0-100)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="Min"
+                        value={filters.minoLRange?.min ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          minoLRange: e.target.value ? { min: Number(e.target.value), max: prev.minoLRange?.max ?? 100 } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Max"
+                        value={filters.minoLRange?.max ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          minoLRange: e.target.value ? { min: prev.minoLRange?.min ?? 0, max: Number(e.target.value) } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">a* (Red/Green: -60 to +60)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="Min"
+                        value={filters.minoARange?.min ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          minoARange: e.target.value ? { min: Number(e.target.value), max: prev.minoARange?.max ?? 60 } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Max"
+                        value={filters.minoARange?.max ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          minoARange: e.target.value ? { min: prev.minoARange?.min ?? -60, max: Number(e.target.value) } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">b* (Yellow/Blue: -60 to +60)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="Min"
+                        value={filters.minoBRange?.min ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          minoBRange: e.target.value ? { min: Number(e.target.value), max: prev.minoBRange?.max ?? 60 } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Max"
+                        value={filters.minoBRange?.max ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          minoBRange: e.target.value ? { min: prev.minoBRange?.min ?? -60, max: Number(e.target.value) } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </div>
                   </div>
                 </div>
-                
-                {/* Minolta Color Filters */}
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
-                    Advanced Filters (Minolta Color Values)
-                  </summary>
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        L* (Lightness: 0-100)
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          placeholder="Min"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null
-                            setMinoLFilter(prev => val !== null ? { min: val, max: prev?.max ?? 100 } : null)
-                          }}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 font-normal"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Max"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null
-                            setMinoLFilter(prev => val !== null ? { min: prev?.min ?? 0, max: val } : null)
-                          }}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 font-normal"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        a* (Red/Green: -60 to +60)
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          placeholder="Min"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null
-                            setMinoAFilter(prev => val !== null ? { min: val, max: prev?.max ?? 60 } : null)
-                          }}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 font-normal"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Max"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null
-                            setMinoAFilter(prev => val !== null ? { min: prev?.min ?? -60, max: val } : null)
-                          }}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 font-normal"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        b* (Yellow/Blue: -60 to +60)
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          placeholder="Min"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null
-                            setMinoBFilter(prev => val !== null ? { min: val, max: prev?.max ?? 60 } : null)
-                          }}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 font-normal"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Max"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null
-                            setMinoBFilter(prev => val !== null ? { min: prev?.min ?? -60, max: val } : null)
-                          }}
-                          className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 font-normal"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setMinoLFilter(null)
-                      setMinoAFilter(null)
-                      setMinoBFilter(null)
-                    }}
-                    className="mt-2 text-xs text-gray-600 hover:text-gray-900"
-                  >
-                    Clear all filters
-                  </button>
-                </details>
               </div>
 
-              {/* Sample Grid */}
-              <div className="p-4 max-h-[calc(100vh-20rem)] overflow-y-auto">
-                {loading ? (
-                  <div className="text-center py-12 text-gray-500">Loading samples...</div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    {filteredSamples.map(sample => {
-                      const isSelected = selectedSamples.has(sample.id)
-                      return (
-                        <div
-                          key={sample.id}
-                          onClick={() => toggleSample(sample.id)}
-                          className={`relative border-2 rounded-lg overflow-hidden cursor-pointer transition-all ${
-                            isSelected 
-                              ? 'border-green-500 ring-2 ring-green-500 ring-offset-2' 
-                              : 'border-gray-200 hover:border-green-300'
-                          }`}
-                        >
-                          {/* Selection Checkbox */}
-                          <div className="absolute top-2 left-2 z-10">
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                              isSelected ? 'bg-green-500' : 'bg-white border-2 border-gray-300'
-                            }`}>
-                              {isSelected && (
-                                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                </svg>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Image */}
-                          <div className="aspect-square bg-gray-100 relative">
-                            {sample.image_url ? (
-                              <Image
-                                src={sample.image_url}
-                                alt={sample.standardized_chop_id}
-                                fill
-                                className="object-cover"
-                                sizes="(max-width: 768px) 50vw, 33vw"
-                                onError={(e) => {
-                                  console.error('Image failed to load:', sample.image_url)
-                                  e.currentTarget.style.display = 'none'
-                                }}
-                              />
-                            ) : (
-                              <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-xs">
-                                No image
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Info */}
-                          <div className="p-2 bg-white">
-                            <div className="text-xs font-semibold text-gray-900 truncate">
-                              {sample.standardized_chop_id}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Study {sample.study_number}
-                            </div>
-                            {sample.minolta_chop_l !== null && (
-                              <div className="text-xs text-gray-600 mt-1">
-                                L*: {sample.minolta_chop_l?.toFixed(1)}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
+              {/* Sensory Score Ranges */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Sensory Scores (1-6)
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Color Score</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="6"
+                        placeholder="Min"
+                        value={filters.colorRange?.min ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          colorRange: e.target.value ? { min: Number(e.target.value), max: prev.colorRange?.max ?? 6 } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="6"
+                        placeholder="Max"
+                        value={filters.colorRange?.max ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          colorRange: e.target.value ? { min: prev.colorRange?.min ?? 1, max: Number(e.target.value) } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </div>
                   </div>
-                )}
-
-                {!loading && filteredSamples.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No samples found matching your filters
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Marbling Score</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="6"
+                        placeholder="Min"
+                        value={filters.marblingRange?.min ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          marblingRange: e.target.value ? { min: Number(e.target.value), max: prev.marblingRange?.max ?? 6 } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="6"
+                        placeholder="Max"
+                        value={filters.marblingRange?.max ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          marblingRange: e.target.value ? { min: prev.marblingRange?.min ?? 1, max: Number(e.target.value) } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </div>
                   </div>
-                )}
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Firmness Score</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="6"
+                        placeholder="Min"
+                        value={filters.firmnessRange?.min ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          firmnessRange: e.target.value ? { min: Number(e.target.value), max: prev.firmnessRange?.max ?? 6 } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="6"
+                        placeholder="Max"
+                        value={filters.firmnessRange?.max ?? ''}
+                        onChange={(e) => setFilters(prev => ({
+                          ...prev,
+                          firmnessRange: e.target.value ? { min: prev.firmnessRange?.min ?? 1, max: Number(e.target.value) } : null
+                        }))}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* pH Range */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  pH Range (optional)
+                </label>
+                <div className="flex gap-2 max-w-xs">
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="Min"
+                    value={filters.phRange?.min ?? ''}
+                    onChange={(e) => setFilters(prev => ({
+                      ...prev,
+                      phRange: e.target.value ? { min: Number(e.target.value), max: prev.phRange?.max ?? 7 } : null
+                    }))}
+                    className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="Max"
+                    value={filters.phRange?.max ?? ''}
+                    onChange={(e) => setFilters(prev => ({
+                      ...prev,
+                      phRange: e.target.value ? { min: prev.phRange?.min ?? 5, max: Number(e.target.value) } : null
+                    }))}
+                    className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Matching Count */}
+              <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  {loading ? (
+                    'Counting matching samples...'
+                  ) : (
+                    <>
+                      <span className="text-2xl font-bold text-gray-900 dark:text-white">{matchingCount}</span> samples match your criteria
+                      <div className="mt-1 text-xs">
+                        {matchingCount >= config.numberOfSets * 4 ? (
+                          <span className="text-green-600 dark:text-green-400">✓ Enough samples for {config.numberOfSets} sets of 4</span>
+                        ) : (
+                          <span className="text-orange-600 dark:text-orange-400">Need {config.numberOfSets * 4} samples for {config.numberOfSets} sets</span>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Navigation */}
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setStep(2)}
+                disabled={!canProceedToStep2}
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                Next: Configure Experiment →
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Step 2: Configure Experiment */}
+        {step === 2 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Step 2: Configure Experiment
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              Specify experiment details and how to generate comparison sets.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Experiment Name *
+                </label>
+                <input
+                  type="text"
+                  value={config.name}
+                  onChange={(e) => setConfig(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Spring 2025 Tenderness Study"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Description (optional)
+                </label>
+                <textarea
+                  value={config.description}
+                  onChange={(e) => setConfig(prev => ({ ...prev, description: e.target.value }))}
+                  rows={3}
+                  placeholder="Optional description..."
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Experiment Type
+                </label>
+                <select
+                  value={config.type}
+                  onChange={(e) => setConfig(prev => ({ ...prev, type: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="paired_comparison">Paired Comparison</option>
+                  <option value="ranking">Ranking</option>
+                  <option value="preference">Preference Test</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Number of Comparison Sets
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={Math.floor(matchingCount / 4)}
+                  value={config.numberOfSets}
+                  onChange={(e) => setConfig(prev => ({ ...prev, numberOfSets: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Each set contains 4 images. Total samples needed: {config.numberOfSets * 4}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Sampling Strategy
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-start p-3 border border-gray-300 dark:border-gray-600 rounded-md cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <input
+                      type="radio"
+                      name="samplingStrategy"
+                      value="random"
+                      checked={config.samplingStrategy === 'random'}
+                      onChange={(e) => setConfig(prev => ({ ...prev, samplingStrategy: e.target.value as 'random' }))}
+                      className="mt-0.5 mr-3"
+                    />
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-white">Random Sampling</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Randomly select samples from the filtered pool</div>
+                    </div>
+                  </label>
+                  <label className="flex items-start p-3 border border-gray-300 dark:border-gray-600 rounded-md cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <input
+                      type="radio"
+                      name="samplingStrategy"
+                      value="stratified"
+                      checked={config.samplingStrategy === 'stratified'}
+                      onChange={(e) => setConfig(prev => ({ ...prev, samplingStrategy: e.target.value as 'stratified' }))}
+                      className="mt-0.5 mr-3"
+                    />
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-white">Stratified Sampling</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Distribute samples evenly across quality ranges</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setStep(1)}
+                className="px-6 py-2 bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-white rounded-md hover:bg-gray-400 dark:hover:bg-gray-500 transition-colors"
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => setStep(3)}
+                disabled={!canProceedToStep3}
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                Next: Review & Create →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Review & Create */}
+        {step === 3 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Step 3: Review & Create
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              Review your experiment configuration before creating.
+            </p>
+
+            <div className="space-y-6">
+              {/* Experiment Details */}
+              <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Experiment Details</h3>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600 dark:text-gray-400">Name:</dt>
+                    <dd className="font-medium text-gray-900 dark:text-white">{config.name}</dd>
+                  </div>
+                  {config.description && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">Description:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{config.description}</dd>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600 dark:text-gray-400">Type:</dt>
+                    <dd className="font-medium text-gray-900 dark:text-white capitalize">{config.type.replace('_', ' ')}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600 dark:text-gray-400">Number of Sets:</dt>
+                    <dd className="font-medium text-gray-900 dark:text-white">{config.numberOfSets} sets (4 images each)</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600 dark:text-gray-400">Total Samples:</dt>
+                    <dd className="font-medium text-gray-900 dark:text-white">{config.numberOfSets * 4} samples</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600 dark:text-gray-400">Sampling Strategy:</dt>
+                    <dd className="font-medium text-gray-900 dark:text-white capitalize">{config.samplingStrategy}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* Filter Summary */}
+              <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Sample Pool Filters</h3>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600 dark:text-gray-400">Matching Samples:</dt>
+                    <dd className="font-medium text-green-600 dark:text-green-400">{matchingCount} available</dd>
+                  </div>
+                  {filters.studyNumbers.length > 0 && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">Studies:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.studyNumbers.join(', ')}</dd>
+                    </div>
+                  )}
+                  {filters.minoLRange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">L* Range:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.minoLRange.min} - {filters.minoLRange.max}</dd>
+                    </div>
+                  )}
+                  {filters.minoARange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">a* Range:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.minoARange.min} - {filters.minoARange.max}</dd>
+                    </div>
+                  )}
+                  {filters.minoBRange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">b* Range:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.minoBRange.min} - {filters.minoBRange.max}</dd>
+                    </div>
+                  )}
+                  {filters.colorRange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">Color Score:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.colorRange.min} - {filters.colorRange.max}</dd>
+                    </div>
+                  )}
+                  {filters.marblingRange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">Marbling Score:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.marblingRange.min} - {filters.marblingRange.max}</dd>
+                    </div>
+                  )}
+                  {filters.firmnessRange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">Firmness Score:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.firmnessRange.min} - {filters.firmnessRange.max}</dd>
+                    </div>
+                  )}
+                  {filters.phRange && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-600 dark:text-gray-400">pH Range:</dt>
+                      <dd className="font-medium text-gray-900 dark:text-white">{filters.phRange.min} - {filters.phRange.max}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setStep(2)}
+                className="px-6 py-2 bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-white rounded-md hover:bg-gray-400 dark:hover:bg-gray-500 transition-colors"
+              >
+                ← Back
+              </button>
+              <button
+                onClick={handleCreateExperiment}
+                disabled={loading}
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
+              >
+                {loading ? 'Creating...' : 'Create Experiment'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
