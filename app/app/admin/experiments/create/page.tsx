@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
+import ThemeToggle from '@/app/components/ThemeToggle'
 
 type Sample = {
   id: string
@@ -207,27 +208,30 @@ export default function CreateExperimentPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
-      <header className="bg-white shadow-sm sticky top-0 z-10">
+      <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div>
               <Link 
                 href="/admin/experiments"
-                className="text-sm text-gray-600 hover:text-gray-900 mb-2 inline-block"
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 mb-2 inline-block"
               >
                 ← Back to Experiments
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900">Create New Experiment</h1>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Create New Experiment</h1>
             </div>
-            <div className="text-sm">
-              <span className={`font-medium ${isValidSelection() ? 'text-green-600' : 'text-red-600'}`}>
-                {selectedSamples.size} samples selected
-              </span>
-              <span className="text-gray-500 ml-2">
-                ({selectedSamples.size % 4 === 0 ? '✓' : '✗'} must be multiple of 4)
-              </span>
+            <div className="flex items-center gap-4">
+              <ThemeToggle />
+              <div className="text-sm">
+                <span className={`font-medium ${isValidSelection() ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {selectedSamples.size} samples selected
+                </span>
+                <span className="text-gray-500 dark:text-gray-400 ml-2">
+                  ({selectedSamples.size % 4 === 0 ? '✓' : '✗'} must be multiple of 4)
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -237,8 +241,8 @@ export default function CreateExperimentPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left: Experiment Configuration */}
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg shadow p-6 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Experiment Details</h2>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Experiment Details</h2>
               
               {/* Create Button at Top */}
               <button
