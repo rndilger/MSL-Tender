@@ -208,14 +208,12 @@ export default function CreateExperimentPage() {
       // Create comparison sets (groups of 4)
       const experimentSamples = []
       for (let i = 0; i < config.numberOfSets; i++) {
-        const setNumber = i + 1
         const setStart = i * 4
         for (let j = 0; j < 4; j++) {
           experimentSamples.push({
             experiment_id: (experiment as any).id,
             sample_id: selectedSamples[setStart + j],
-            set_number: setNumber,
-            position_in_set: j + 1
+            sample_order: setStart + j
           })
         }
       }
