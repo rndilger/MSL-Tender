@@ -196,7 +196,8 @@ export default function CreateExperimentPage() {
           name: config.name,
           description: config.description,
           status: 'draft',
-          type: config.type,
+          experiment_type: config.type,
+          num_images: 4,
           created_by: user?.id
         } as any)
         .select()
