@@ -96,12 +96,18 @@ export async function POST(request: Request) {
       body: JSON.stringify({ urls: imageUrls })
     })
 
+    console.log('[Process Images] Python API response status:', pythonResponse.status)
+    console.log('[Process Images] Python API response headers:', Object.fromEntries(pythonResponse.headers.entries()))
+
     if (!pythonResponse.ok) {
       const errorText = await pythonResponse.text()
       console.error('[Process Images] Python API error:', errorText)
+      console.error('[Process Images] Python API status:', pythonResponse.status)
+      console.error('[Process Images] Python API status text:', pythonResponse.statusText)
       return NextResponse.json({
         error: 'Python processing failed',
-        details: errorText
+        details: errorText || `HTTP ${pythonResponse.status}: ${pythonResponse.statusText}`,
+        status: pythonResponse.status
       }, { status: 500 })
     }
 
