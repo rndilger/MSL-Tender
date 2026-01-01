@@ -53,6 +53,9 @@ export default function AdminLogin() {
 
       console.log('[Login Page] API success! User:', data.user)
       console.log('[Login Page] Redirecting to:', data.redirectUrl)
+      
+      // Log all cookies before redirect
+      console.log('[Login Page] Cookies before redirect:', document.cookie)
 
       // Redirect to dashboard - the cookies are now set server-side
       window.location.href = data.redirectUrl

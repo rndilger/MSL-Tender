@@ -13,6 +13,8 @@ type AdminUser = {
 export default async function AdminDashboard() {
   try {
     console.log('[Dashboard Page] ===== RENDERING PAGE =====')
+    console.log('[Dashboard Page] URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
+    console.log('[Dashboard Page] NODE_ENV:', process.env.NODE_ENV)
     
     const supabase = await createClient()
     console.log('[Dashboard Page] Supabase client created')
@@ -21,6 +23,7 @@ export default async function AdminDashboard() {
     const { data: { user }, error: userError } = await supabase.auth.getUser()
     
     console.log('[Dashboard Page] User result:', user?.email || 'NULL')
+    console.log('[Dashboard Page] User ID:', user?.id || 'NULL')
     console.log('[Dashboard Page] Error result:', userError?.message || 'NONE')
     
     if (!user) {

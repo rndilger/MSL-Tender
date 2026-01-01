@@ -90,28 +90,38 @@ export async function POST(request: NextRequest) {
     if (data.session) {
       const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1]
       
+      console.log('[API Auth] Project ref:', projectRef)
+      console.log('[API Auth] Session expires_in:', data.session.expires_in)
+      console.log('[API Auth] NODE_ENV:', process.env.NODE_ENV)
+      
       if (projectRef) {
-        // Set the main auth token cookie that Supabase expects
-        response.cookies.set(`sb-${projectRef}-auth-token`, 
-          JSON.stringify({
-            access_token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-            expires_at: data.session.expires_at,
-            expires_in: data.session.expires_in,
-            token_type: 'bearer',
-            user: data.session.user
-          }), 
-          {
-            httpOnly: false, // Supabase client needs to read this
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: data.session.expires_in || 3600,
-            path: '/',
-          }
-        )
+        const cookieValue = JSON.stringify({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+          expires_at: data.session.expires_at,
+          expires_in: data.session.expires_in,
+          token_type: 'bearer',
+          user: data.session.user
+        })
         
-        console.log('[API Auth] Set cookie:', `sb-${projectRef}-auth-token`)
+        const cookieName = `sb-${projectRef}-auth-token`
+        
+        // Set the main auth token cookie that Supabase expects
+        response.cookies.set(cookieName, cookieValue, {
+          httpOnly: false, // Supabase client needs to read this
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: data.session.expires_in || 3600,
+          path: '/',
+        })
+        
+        console.log('[API Auth] Set cookie:', cookieName)
+        console.log('[API Auth] Cookie value length:', cookieValue.length)
+      } else {
+        console.error('[API Auth] ERROR: Could not extract project ref from URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
       }
+    } else {
+      console.error('[API Auth] ERROR: No session in auth response')
     }
 
     console.log('[API Auth] Response cookies set:', response.cookies.getAll().map(c => c.name))
