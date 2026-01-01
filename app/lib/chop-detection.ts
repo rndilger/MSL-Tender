@@ -61,10 +61,10 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       }
     }
     
-    // Apply morphological operations to clean up mask
+    // Apply morphological operations to clean up mask - more aggressive
     // Remove small noise and fill small holes
     const cleaned = new Uint8Array(width * height);
-    const kernelSize = 5;
+    const kernelSize = 9; // Larger kernel for better cleaning
     const kernelRadius = Math.floor(kernelSize / 2);
     
     for (let y = kernelRadius; y < height - kernelRadius; y++) {
@@ -76,7 +76,7 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
           }
         }
         // If majority of neighbors are chop pixels, this is a chop pixel
-        cleaned[y * width + x] = sum > (kernelSize * kernelSize / 2) ? 1 : 0;
+        cleaned[y * width + x] = sum > (kernelSize * kernelSize * 0.6) ? 1 : 0;
       }
     }
     
@@ -124,8 +124,11 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       }
     }
     
-    if (largestLabel === 0) {
-      console.warn(`No chop detected in image: ${imageUrl}`);
+    // Require that the largest component is significantly larger than others
+    // This helps filter out cases where the tag is picked up
+    const secondLargestSize = Math.max(...Array.from(componentSizes.values()).filter(s => s !== largestSize));
+    if (largestLabel === 0 || largestSize < secondLargestSize * 3) {
+      console.warn(`No clear chop component detected in image: ${imageUrl}`);
       return {
         x1: 0,
         y1: 0,
@@ -152,9 +155,9 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
       }
     }
     
-    // Add 2% margin around detected region
-    const marginX = Math.round((maxX - minX) * 0.02);
-    const marginY = Math.round((maxY - minY) * 0.02);
+    // Add minimal margin around detected region - tighter crop
+    const marginX = Math.round((maxX - minX) * 0.01);
+    const marginY = Math.round((maxY - minY) * 0.01);
     
     const x1 = Math.max(0, minX - marginX);
     const y1 = Math.max(0, minY - marginY);
@@ -188,7 +191,7 @@ export async function detectChopBoundaries(imageUrl: string): Promise<CropCoordi
 
 /**
  * Process image: crop to chop region and remove background
- * Always outputs in landscape orientation
+ * Maintains original orientation
  */
 export async function processChopImage(imageUrl: string, coords: CropCoordinates): Promise<Buffer> {
   const response = await fetch(imageUrl);
@@ -202,8 +205,8 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
   // Get raw pixel data
   const { data } = await image.raw().ensureAlpha().toBuffer({ resolveWithObject: true });
   
-  // Create alpha channel for background removal
-  const outputData = Buffer.alloc(width * height * 4);
+  // Create mask for chop pixels
+  const mask = new Uint8Array(width * height);
   
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -212,7 +215,7 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
       const g = data[idx + 1];
       const b = data[idx + 2];
       
-      // Check if this is chop color or background
+      // Same color detection as in detectChopBoundaries
       const isChopColor = 
         r >= 120 && r <= 255 &&
         g >= 80 && g <= 200 &&
@@ -223,12 +226,87 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
         !(b > r + 20);
       
       if (isChopColor) {
+        mask[y * width + x] = 1;
+      }
+    }
+  }
+  
+  // Apply morphological cleaning
+  const cleaned = new Uint8Array(width * height);
+  const kernelSize = 9;
+  const kernelRadius = Math.floor(kernelSize / 2);
+  
+  for (let y = kernelRadius; y < height - kernelRadius; y++) {
+    for (let x = kernelRadius; x < width - kernelRadius; x++) {
+      let sum = 0;
+      for (let ky = -kernelRadius; ky <= kernelRadius; ky++) {
+        for (let kx = -kernelRadius; kx <= kernelRadius; kx++) {
+          sum += mask[(y + ky) * width + (x + kx)];
+        }
+      }
+      cleaned[y * width + x] = sum > (kernelSize * kernelSize * 0.6) ? 1 : 0;
+    }
+  }
+  
+  // Find connected components and keep only the largest
+  const labels = new Int32Array(width * height);
+  let currentLabel = 1;
+  const componentSizes = new Map<number, number>();
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (cleaned[y * width + x] === 1 && labels[y * width + x] === 0) {
+        const stack = [[x, y]];
+        let componentSize = 0;
+        
+        while (stack.length > 0) {
+          const [cx, cy] = stack.pop()!;
+          if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+          if (labels[cy * width + cx] !== 0 || cleaned[cy * width + cx] !== 1) continue;
+          
+          labels[cy * width + cx] = currentLabel;
+          componentSize++;
+          
+          stack.push([cx + 1, cy]);
+          stack.push([cx - 1, cy]);
+          stack.push([cx, cy + 1]);
+          stack.push([cx, cy - 1]);
+        }
+        
+        componentSizes.set(currentLabel, componentSize);
+        currentLabel++;
+      }
+    }
+  }
+  
+  // Find largest component
+  let largestLabel = 0;
+  let largestSize = 0;
+  for (const [label, size] of componentSizes) {
+    if (size > largestSize) {
+      largestSize = size;
+      largestLabel = label;
+    }
+  }
+  
+  // Create alpha channel - only keep the largest component
+  const outputData = Buffer.alloc(width * height * 4);
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      
+      // Only show pixels that belong to the largest component
+      if (labels[y * width + x] === largestLabel) {
         outputData[idx] = r;
         outputData[idx + 1] = g;
         outputData[idx + 2] = b;
         outputData[idx + 3] = 255; // Opaque
       } else {
-        // Make background white
+        // White background
         outputData[idx] = 255;
         outputData[idx + 1] = 255;
         outputData[idx + 2] = 255;
@@ -237,8 +315,8 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
     }
   }
   
-  // Create image with transparency, crop to bounding box
-  let processed = sharp(outputData, {
+  // Create image, crop to bounding box, maintain original orientation
+  const processed = sharp(outputData, {
     raw: {
       width,
       height,
@@ -251,15 +329,6 @@ export async function processChopImage(imageUrl: string, coords: CropCoordinates
     width: coords.x2 - coords.x1,
     height: coords.y2 - coords.y1
   });
-  
-  // Ensure landscape orientation
-  const cropWidth = coords.x2 - coords.x1;
-  const cropHeight = coords.y2 - coords.y1;
-  
-  if (cropHeight > cropWidth) {
-    // Portrait - rotate to landscape
-    processed = processed.rotate(90);
-  }
   
   return processed.jpeg({ quality: 95 }).toBuffer();
 }
