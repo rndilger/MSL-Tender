@@ -18,7 +18,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the needs_manual_review flag
-    // @ts-expect-error - needs_manual_review column exists but types not regenerated
     const { data, error } = await supabase
       .from('sample_images')
       .update({ needs_manual_review: needsReview })
