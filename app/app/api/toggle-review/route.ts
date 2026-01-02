@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
     // Update the needs_manual_review flag
     const { data, error } = await supabase
       .from('sample_images')
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore - Column exists in DB but types need regeneration
       .update({ needs_manual_review: needsReview })
       .eq('id', imageId)
