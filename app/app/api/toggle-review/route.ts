@@ -18,14 +18,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the needs_manual_review flag
-    /* eslint-disable @typescript-eslint/no-explicit-any */
+    // @ts-expect-error - needs_manual_review column exists but types not regenerated
     const { data, error } = await supabase
       .from('sample_images')
-      .update({ needs_manual_review: needsReview } as any)
+      .update({ needs_manual_review: needsReview })
       .eq('id', imageId)
       .select('id, needs_manual_review')
       .single()
-    /* eslint-enable @typescript-eslint/no-explicit-any */
 
     if (error) {
       console.error('Error updating review flag:', error)
